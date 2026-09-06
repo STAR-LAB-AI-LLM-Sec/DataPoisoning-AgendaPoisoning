@@ -1,0 +1,5 @@
+# AgendaBot（会议日程助手）基准（Baseline）运行依赖
+# 仅需 CPU 即可跑通攻击/防御终端脚本
+# - mock 离线模式：仅标准库（确定性规则 Agent 模拟器，无第三方依赖）
+# - api 真实大模型模式：额外需要 openai（OpenAI 兼容端点：OpenAI / vLLM / Ollama /v1 / LM Studio）
+openai>=1.40.0
