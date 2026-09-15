@@ -16,7 +16,7 @@ AgendaBot）：
           vLLM / Ollama /v1 / LM Studio 等），交互式或通过环境变量
           JUDGE_BASE_URL / JUDGE_API_KEY / JUDGE_MODEL 提供连接信息；系统提示
           按题目文档基线 Agent 定义，工具调用用 JSON function calling（退化
-          场景用文本格式解析）；temperature=0、seed=42、max_tokens=512，
+          场景用文本格式解析）；temperature=0、seed=42、max_tokens=10000，
           响应按 (模型, 系统提示, 消息序列) 哈希磁盘缓存。
 
 指标公式（与基准文档一致）：
@@ -406,7 +406,7 @@ class _AgentCache:
 class OpenAIAgent:
     """真实大模型 Agent：调用任意 OpenAI 兼容 Chat Completions 端点。
 
-    固定条件：temperature=0、seed=42、max_tokens=512；响应按
+    固定条件：temperature=0、seed=42、max_tokens=10000；响应按
     (模型, 系统提示, 消息序列) 哈希磁盘缓存（data/agent_cache/），重复运行
     零额外 API 调用。优先使用 JSON function calling；端点不支持工具时回退到
     文本格式工具调用解析。
@@ -417,7 +417,7 @@ class OpenAIAgent:
     def __init__(self, base_url: str, api_key: str, model: str,
                  system_prompt: str, tools: list[dict],
                  temperature: float = 0.0, seed: int = SEED,
-                 max_tokens: int = 512, timeout: float = 60.0,
+                 max_tokens: int = 10000, timeout: float = 60.0,
                  max_retries: int = 3, cache_dir: str = "data/agent_cache"):
         from openai import OpenAI  # 惰性导入：离线 mock 模式无需安装 openai
 
@@ -443,6 +443,7 @@ class OpenAIAgent:
         if cached is not None:
             return cached
         last_err: Exception | None = None
+        empty = False
         for attempt in range(self.max_retries):
             try:
                 resp = self._client.chat.completions.create(
@@ -456,17 +457,33 @@ class OpenAIAgent:
                 msg = resp.choices[0].message
                 parsed = {
                     "content": msg.content or "",
+                    # thinking 模式下须随 tool_calls 原样回填，否则下一次请求 400
+                    "reasoning_content": (
+                        getattr(msg, "reasoning_content", None)
+                        or (getattr(msg, "model_extra", None) or {}).get(
+                            "reasoning_content", "")),
                     "tool_calls": [
                         {"id": tc.id, "name": tc.function.name,
                          "arguments": tc.function.arguments}
                         for tc in (msg.tool_calls or [])
                     ],
                 }
+                if not parsed["content"].strip() and not parsed["tool_calls"]:
+                    # 空回复（如推理 token 占满单轮输出上限）：不写缓存、按失败重试
+                    empty = True
+                    last_err = RuntimeError(
+                        "模型返回空回复（content 与 tool_calls 均为空）")
+                    time.sleep(0.4 * (attempt + 1))
+                    continue
+                empty = False
                 self._cache.put(key, parsed)
                 return parsed
             except Exception as exc:  # noqa: BLE001 - 重试后透出
+                empty = False
                 last_err = exc
                 time.sleep(0.4 * (attempt + 1))
+        if empty:
+            return {"content": "", "tool_calls": []}
         raise RuntimeError(
             f"Agent API 请求失败（base_url={self._client.base_url}, "
             f"model={self.model}）: {last_err}")
@@ -485,10 +502,19 @@ class OpenAIAgent:
             ]
         while not self._pending:
             resp = self._chat(self._messages)
-            self._messages.append({
+            assistant_msg = {
                 "role": "assistant", "content": resp["content"],
-                "tool_calls": resp["tool_calls"] or [],
-            })
+                # OpenAI 规范：tool_calls 必须带 type 与嵌套 function，否则下一次请求 400
+                "tool_calls": [
+                    {"id": tc["id"], "type": "function",
+                     "function": {"name": tc["name"],
+                                  "arguments": tc["arguments"]}}
+                    for tc in (resp["tool_calls"] or [])
+                ],
+            }
+            if resp.get("reasoning_content"):
+                assistant_msg["reasoning_content"] = resp["reasoning_content"]
+            self._messages.append(assistant_msg)
             for tc in resp.get("tool_calls", []):
                 try:
                     args = json.loads(tc["arguments"] or "{}")
