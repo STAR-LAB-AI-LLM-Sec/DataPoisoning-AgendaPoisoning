@@ -1,0 +1,18 @@
+{
+  "workDirId": "mv96df6rmre92z",
+  "branch": "def-wacl123",
+  "uploaderBranch": true,
+  "githubAccount": "waaccll1123-sudo",
+  "displayName": "陈朗",
+  "scenario": "agendabot",
+  "role": "solo_defense",
+  "userId": "5ea9ed2c-f70a-4f6c-afb4-84b94103f329",
+  "version": 1,
+  "originalZipName": "defense.py",
+  "archivedZip": false,
+  "uploadedAt": "2026-10-15T06:46:04.895Z",
+  "files": [
+    "defense.py"
+  ],
+  "skippedLargeFiles": []
+}
