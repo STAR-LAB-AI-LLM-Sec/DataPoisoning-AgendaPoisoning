@@ -1,0 +1,11 @@
+{
+  "workDirId": "mv96df6rmre92z",
+  "scenario": "agendabot",
+  "role": "solo_defense",
+  "version": 1,
+  "uploadedAt": "2026-10-15T06:46:08.315Z",
+  "files": [
+    "defense.py",
+    "meta.json"
+  ]
+}
